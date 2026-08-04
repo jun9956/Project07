@@ -72,3 +72,9 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# Generated Unreal Engine directories in projects nested below the repository root
+**/Binaries/
+**/DerivedDataCache/
+**/Intermediate/
+**/Saved/

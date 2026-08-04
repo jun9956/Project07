@@ -78,3 +78,6 @@ DerivedDataCache/*
 **/DerivedDataCache/
 **/Intermediate/
 **/Saved/
+
+# JetBrains Rider / IntelliJ
+**/.idea/

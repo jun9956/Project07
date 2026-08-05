@@ -14,7 +14,8 @@ public class MultiplayerChat : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
-				"Engine"
+				"Engine",
+				"UMG"
 			}
 		);
 	}

@@ -1,5 +1,7 @@
 ﻿#include "MultiplayerChatComponent.h"
 
+#include "Blueprint/UserWidget.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -8,11 +10,59 @@ DEFINE_LOG_CATEGORY_STATIC(LogMultiplayerChat, Log, All);
 
 UMultiplayerChatComponent::UMultiplayerChatComponent()
 {
-	
 	PrimaryComponentTick.bCanEverTick = false;
+	
+	// 플러그인에 포함된 기본 채팅 위젯 클래스를 설정
+	static ConstructorHelpers::FClassFinder<UUserWidget>
+		DefaultChatWidgetClass(
+			TEXT("/MultiplayerChat/UI/WBP_MultiplayerChat")
+		);
+
+	if (DefaultChatWidgetClass.Succeeded())
+	{
+		ChatWidgetClass = DefaultChatWidgetClass.Class;
+	}
 
 	// Server RPC와 Client RPC를 사용할 수 있도록 컴포넌트 복제를 활성화
 	SetIsReplicatedByDefault(true);
+}
+
+void UMultiplayerChatComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// 자동 UI 생성이 꺼져 있으면 아무 작업도 하지 않습니다.
+	if (!bAutoCreateChatWidget || ChatWidgetClass == nullptr)
+	{
+		return;
+	}
+
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 로컬 플레이어의 PlayerController에서만 UI를 생성.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	ChatWidget = CreateWidget<UUserWidget>(OwningPlayerController,ChatWidgetClass);
+
+	if (ChatWidget != nullptr)
+	{
+		ChatWidget->AddToPlayerScreen();
+	}
+}
+
+void UMultiplayerChatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 생성된 채팅 UI가 있으면 화면에서 제거
+	if (ChatWidget != nullptr)
+	{
+		ChatWidget->RemoveFromParent();
+		ChatWidget = nullptr;
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void UMultiplayerChatComponent::SendGlobalMessage(const FString& MessageText)

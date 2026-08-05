@@ -15,6 +15,7 @@ public class Project7 : ModuleRules
 			"Engine", 
 			"InputCore", 
 			"EnhancedInput",
+			"MultiplayerChat"
 			
 		});
 		PrivateDependencyModuleNames.AddRange(new string[]

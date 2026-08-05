@@ -22,6 +22,13 @@ UMultiplayerChatComponent::UMultiplayerChatComponent()
 		ChatWidgetClass = DefaultChatWidgetClass.Class;
 	}
 
+	ReservedNicknames =
+	{
+		TEXT("System"),
+		TEXT("Server"),
+		TEXT("Admin")
+	};
+
 	// Server RPC와 Client RPC를 사용할 수 있도록 컴포넌트 복제를 활성화
 	SetIsReplicatedByDefault(true);
 }
@@ -140,6 +147,22 @@ void UMultiplayerChatComponent::DeactivateChatInput()
 	}
 
 	OnChatInputStateChanged.Broadcast(false);
+}
+
+void UMultiplayerChatComponent::RequestNicknameChange(const FString& NewNickname)
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 소유 로컬 플레이어만 닉네임 변경을 요청할 수 있습니다.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	FString SanitizedNickname = NewNickname;
+	SanitizedNickname.TrimStartAndEndInline();
+
+	ServerRequestNicknameChange(SanitizedNickname);
 }
 
 void UMultiplayerChatComponent::ServerSendGlobalMessage_Implementation(const FString& MessageText)
@@ -371,4 +394,121 @@ FString UMultiplayerChatComponent::ResolveDisplayName(APlayerState* PlayerState)
 
 	// Identity Provider가 없거나 빈 이름을 반환하면 기본 PlayerState 이름을 사용합니다.
 	return PlayerState->GetPlayerName();
+}
+
+void UMultiplayerChatComponent::ServerRequestNicknameChange_Implementation(const FString& NewNickname)
+{
+	FString SanitizedNickname = NewNickname;
+	SanitizedNickname.TrimStartAndEndInline();
+
+	APlayerController* OwningPlayerController =Cast<APlayerController>(GetOwner());
+
+	APlayerState* SenderPlayerState = OwningPlayerController != nullptr? OwningPlayerController->PlayerState: nullptr;
+
+	UWorld* World = GetWorld();
+
+	if (OwningPlayerController == nullptr || SenderPlayerState == nullptr || World == nullptr)
+	{
+		ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::Unavailable,SanitizedNickname);
+		return;
+	}
+
+	if (!bAllowClientNicknameChanges)
+	{
+		ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::ChangesDisabled,SanitizedNickname);
+		return;
+	}
+
+	// 외부 Identity Provider가 이름을 제공하면 플러그인이 변경하지 않습니다.
+	const bool bHasIdentityProvider =SenderPlayerState->GetClass()->ImplementsInterface(UMultiplayerChatIdentityProvider::StaticClass());
+
+	if (bHasIdentityProvider)
+	{
+		FString ProviderDisplayName =IMultiplayerChatIdentityProvider::Execute_GetMultiplayerChatDisplayName(SenderPlayerState);
+
+		ProviderDisplayName.TrimStartAndEndInline();
+
+		if (!ProviderDisplayName.IsEmpty())
+		{
+			ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::ManagedExternally,SanitizedNickname);
+			return;
+		}
+	}
+
+	const double CurrentTime = World->GetTimeSeconds();
+
+	// 너무 빠른 닉네임 변경 요청을 거부합니다.
+	if (LastNicknameChangeRequestTime >= 0.0 && CurrentTime - LastNicknameChangeRequestTime< MinimumNicknameChangeInterval)
+	{
+		ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::RateLimited,SanitizedNickname);
+		return;
+	}
+
+	LastNicknameChangeRequestTime = CurrentTime;
+
+	if (SanitizedNickname.Len() < MinimumNicknameLength || SanitizedNickname.Len() > MaximumNicknameLength)
+	{
+		ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::InvalidLength,SanitizedNickname);
+		return;
+	}
+
+	// 한글, 영문, 숫자와 밑줄만 허용합니다.
+	for (const TCHAR Character : SanitizedNickname)
+	{
+		const bool bIsHangul =
+			(Character >= 0x1100 && Character <= 0x11FF)
+			|| (Character >= 0x3130 && Character <= 0x318F)
+			|| (Character >= 0xAC00 && Character <= 0xD7A3);
+
+		const bool bIsAllowed =
+			FChar::IsAlnum(Character) || bIsHangul || Character == TEXT('_');
+
+		if (!bIsAllowed)
+		{
+			ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::InvalidCharacters,SanitizedNickname);
+			return;
+		}
+	}
+
+	for (const FString& ReservedNickname : ReservedNicknames)
+	{
+		if (ReservedNickname.Equals(SanitizedNickname,ESearchCase::IgnoreCase))
+		{
+			ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::ReservedName,SanitizedNickname);
+			return;
+		}
+	}
+
+	// 다른 접속 플레이어가 동일한 닉네임을 사용하는지 확인합니다.
+	for (FConstPlayerControllerIterator Iterator =
+			World->GetPlayerControllerIterator();
+		 Iterator;
+		 ++Iterator)
+	{
+		APlayerController* TargetController = Iterator->Get();
+
+		if (TargetController == nullptr || TargetController == OwningPlayerController || TargetController->PlayerState == nullptr)
+		{
+			continue;
+		}
+
+		const FString ExistingDisplayName =ResolveDisplayName(TargetController->PlayerState);
+
+		if (ExistingDisplayName.Equals(SanitizedNickname,ESearchCase::IgnoreCase))
+		{
+			ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::AlreadyInUse,SanitizedNickname);
+			return;
+		}
+	}
+
+	// 검증에 통과한 이름을 서버의 PlayerState에 적용합니다.
+	SenderPlayerState->SetPlayerName(SanitizedNickname);
+	SenderPlayerState->ForceNetUpdate();
+
+	ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::Success,SanitizedNickname);
+}
+
+void UMultiplayerChatComponent::ClientReceiveNicknameChangeResult_Implementation(EMultiplayerChatNicknameResult Result,const FString& Nickname)
+{
+	OnNicknameChangeResult.Broadcast(Result, Nickname);
 }

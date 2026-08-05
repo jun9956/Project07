@@ -24,6 +24,15 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	bIsActive
 );
 
+// 서버가 닉네임 변경 요청을 처리한 뒤 로컬 UI에 결과를 전달
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnMultiplayerChatNicknameChangeResult,
+	EMultiplayerChatNicknameResult,
+	Result,
+	const FString&,
+	Nickname
+);
+
 // 플레이어의 채팅 송수신을 담당하는 네트워크 컴포넌트
 // 이 컴포넌트는 PlayerController에 장착할 예정
 // 클라이언트가 보낸 메시지를 서버에 전달하고,
@@ -55,6 +64,14 @@ public:
 	// 채팅 입력 상태가 변경될 때 UI에 알리는 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat|Input")
 	FOnMultiplayerChatInputStateChanged OnChatInputStateChanged;
+
+	// 로컬 플레이어가 서버에 세션 닉네임 변경을 요청
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Identity")
+	void RequestNicknameChange(const FString& NewNickname);
+
+	// 닉네임 변경 요청 결과를 Blueprint와 UI에 전달
+	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat|Identity")
+	FOnMultiplayerChatNicknameChangeResult OnNicknameChangeResult;
 
 protected:
 	// 컴포넌트가 게임에 진입하면 로컬 플레이어의 채팅 UI를 생성
@@ -131,4 +148,35 @@ private:
 
 	// 프로젝트 Identity Provider 또는 PlayerState에서 표시 이름을 결정
 	FString ResolveDisplayName(APlayerState* PlayerState) const;
+
+	// 소유 클라이언트가 서버에 닉네임 변경을 요청
+	UFUNCTION(Server, Reliable)
+	void ServerRequestNicknameChange(const FString& NewNickname);
+
+	// 서버가 소유 클라이언트에 닉네임 변경 결과를 전달
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult Result,const FString& Nickname);
+
+	// 플러그인이 클라이언트의 세션 닉네임 변경을 허용할지 결정
+	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Identity")
+	bool bAllowClientNicknameChanges = true;
+
+	// 허용할 최소 닉네임 길이
+	UPROPERTY(EditDefaultsOnly,Category = "Multiplayer Chat|Identity",meta = (ClampMin = "1"))
+	int32 MinimumNicknameLength = 2;
+
+	// 허용할 최대 닉네임 길이
+	UPROPERTY(EditDefaultsOnly,Category = "Multiplayer Chat|Identity",meta = (ClampMin = "1"))
+	int32 MaximumNicknameLength = 16;
+
+	// 서버가 허용할 닉네임 변경 요청의 최소 간격
+	UPROPERTY(EditDefaultsOnly,Category = "Multiplayer Chat|Identity",meta = (ClampMin = "0.0"))
+	float MinimumNicknameChangeInterval = 3.0f;
+
+	// 플레이어가 사용할 수 없는 예약 닉네임
+	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Identity")
+	TArray<FString> ReservedNicknames;
+
+	// 서버에서 도배 방지를 계산하기 위한 마지막 닉네임 요청 시각
+	double LastNicknameChangeRequestTime = -1.0;
 };

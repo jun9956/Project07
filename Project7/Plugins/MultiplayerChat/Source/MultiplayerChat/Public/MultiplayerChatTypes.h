@@ -19,6 +19,21 @@ enum class EMultiplayerChatChannel : uint8
 	System  UMETA(DisplayName = "System")
 };
 
+// 서버가 처리한 닉네임 변경 요청의 결과
+UENUM(BlueprintType)
+enum class EMultiplayerChatNicknameResult : uint8
+{
+	Success           UMETA(DisplayName = "Success"),
+	ChangesDisabled   UMETA(DisplayName = "Changes Disabled"),
+	ManagedExternally UMETA(DisplayName = "Managed Externally"),
+	InvalidLength     UMETA(DisplayName = "Invalid Length"),
+	InvalidCharacters UMETA(DisplayName = "Invalid Characters"),
+	AlreadyInUse      UMETA(DisplayName = "Already In Use"),
+	ReservedName      UMETA(DisplayName = "Reserved Name"),
+	RateLimited       UMETA(DisplayName = "Rate Limited"),
+	Unavailable		  UMETA(DisplayName = "Unavailable")
+};
+
 USTRUCT(BlueprintType)
 struct MULTIPLAYERCHAT_API FMultiplayerChatMessage
 {

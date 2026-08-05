@@ -1,5 +1,6 @@
 ﻿#include "MultiplayerChatComponent.h"
 
+#include "Components/InputComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Engine/World.h"
@@ -13,10 +14,7 @@ UMultiplayerChatComponent::UMultiplayerChatComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 	
 	// 플러그인에 포함된 기본 채팅 위젯 클래스를 설정
-	static ConstructorHelpers::FClassFinder<UUserWidget>
-		DefaultChatWidgetClass(
-			TEXT("/MultiplayerChat/UI/WBP_MultiplayerChat")
-		);
+	static ConstructorHelpers::FClassFinder<UUserWidget>DefaultChatWidgetClass(TEXT("/MultiplayerChat/UI/WBP_MultiplayerChat"));
 
 	if (DefaultChatWidgetClass.Succeeded())
 	{
@@ -31,30 +29,36 @@ void UMultiplayerChatComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 자동 UI 생성이 꺼져 있으면 아무 작업도 하지 않습니다.
-	if (!bAutoCreateChatWidget || ChatWidgetClass == nullptr)
-	{
-		return;
-	}
-
 	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
 
-	// 로컬 플레이어의 PlayerController에서만 UI를 생성.
+	// 로컬 PlayerController에서만 UI와 입력을 준비합니다.
 	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
 	{
 		return;
 	}
 
-	ChatWidget = CreateWidget<UUserWidget>(OwningPlayerController,ChatWidgetClass);
-
-	if (ChatWidget != nullptr)
+	if (bAutoCreateChatWidget && ChatWidgetClass != nullptr)
 	{
-		ChatWidget->AddToPlayerScreen();
+		ChatWidget = CreateWidget<UUserWidget>(OwningPlayerController,ChatWidgetClass);
+
+		if (ChatWidget != nullptr)
+		{
+			ChatWidget->AddToPlayerScreen();
+		}
 	}
+
+	SetupLocalChatInput();
 }
 
 void UMultiplayerChatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (bIsChatInputActive)
+	{
+		DeactivateChatInput();
+	}
+
+	TeardownLocalChatInput();
+
 	// 생성된 채팅 UI가 있으면 화면에서 제거
 	if (ChatWidget != nullptr)
 	{
@@ -81,8 +85,63 @@ void UMultiplayerChatComponent::SendGlobalMessage(const FString& MessageText)
 	ServerSendGlobalMessage(TrimmedMessage);
 }
 
-void UMultiplayerChatComponent::ServerSendGlobalMessage_Implementation(
-	const FString& MessageText)
+void UMultiplayerChatComponent::ActivateChatInput()
+{
+	if (bIsChatInputActive)
+	{
+		return;
+	}
+
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	bIsChatInputActive = true;
+
+	if (ChatInputComponent != nullptr && ChatInputComponent->KeyBindings.IsValidIndex(CancelInputBindingIndex))
+	{
+		// 채팅 중에는 Escape가 게임의 일시정지 등에 전달되지 않게 합니다.
+		ChatInputComponent->KeyBindings[CancelInputBindingIndex].bConsumeInput = true;
+	}
+
+	FInputModeGameAndUI InputMode;
+	OwningPlayerController->SetInputMode(InputMode);
+
+	// Blueprint UI가 실제 입력 위젯에 포커스를 줄 수 있도록 알립니다.
+	OnChatInputStateChanged.Broadcast(true);
+}
+
+void UMultiplayerChatComponent::DeactivateChatInput()
+{
+	if (!bIsChatInputActive)
+	{
+		return;
+	}
+
+	// 포커스 변경 과정에서 재호출되어도 안전하도록 먼저 상태를 변경합니다.
+	bIsChatInputActive = false;
+
+	if (ChatInputComponent != nullptr && ChatInputComponent->KeyBindings.IsValidIndex(CancelInputBindingIndex))
+	{
+		// 채팅이 끝나면 Escape를 다시 다른 게임 입력에 전달합니다.
+		ChatInputComponent->KeyBindings[CancelInputBindingIndex].bConsumeInput = false;
+	}
+
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	if (OwningPlayerController != nullptr && OwningPlayerController->IsLocalController())
+	{
+		FInputModeGameOnly InputMode;
+		OwningPlayerController->SetInputMode(InputMode);
+	}
+
+	OnChatInputStateChanged.Broadcast(false);
+}
+
+void UMultiplayerChatComponent::ServerSendGlobalMessage_Implementation(const FString& MessageText)
 {
 	constexpr int32 MaximumMessageLength = 256;
 	constexpr double MinimumMessageInterval = 0.5;
@@ -173,4 +232,85 @@ void UMultiplayerChatComponent::ClientReceiveMessage_Implementation(const FMulti
 
 	// Blueprint와 UMG가 메시지를 표시할 수 있도록 이벤트를 발생
 	OnMessageReceived.Broadcast(Message);
+}
+
+void UMultiplayerChatComponent::SetupLocalChatInput()
+{
+	if (!bAutoBindChatInput || ChatInputComponent != nullptr)
+	{
+		return;
+	}
+
+	APlayerController* OwningPlayerController =
+		Cast<APlayerController>(GetOwner());
+
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	ChatInputComponent = NewObject<UInputComponent>(OwningPlayerController,TEXT("MultiplayerChatInputComponent"));
+
+	if (ChatInputComponent == nullptr)
+	{
+		return;
+	}
+
+	ChatInputComponent->RegisterComponent();
+	ChatInputComponent->Priority = ChatInputPriority;
+	ChatInputComponent->bBlockInput = false;
+
+	FInputKeyBinding& ActivateBinding =
+		ChatInputComponent->BindKey(
+			ActivateChatKey,
+			IE_Pressed,
+			this,
+			&UMultiplayerChatComponent::HandleActivateChatInput
+		);
+
+	// 활성화 키는 다른 게임 입력으로 전달하지 않습니다.
+	ActivateBinding.bConsumeInput = true;
+
+	FInputKeyBinding& CancelBinding =
+		ChatInputComponent->BindKey(
+			CancelChatKey,
+			IE_Pressed,
+			this,
+			&UMultiplayerChatComponent::HandleCancelChatInput
+		);
+
+	// 채팅 중이 아닐 때는 Escape를 다른 게임 입력으로 전달
+	CancelBinding.bConsumeInput = false;
+	CancelInputBindingIndex = ChatInputComponent->KeyBindings.Num() - 1;
+
+	OwningPlayerController->PushInputComponent(ChatInputComponent);
+}
+
+void UMultiplayerChatComponent::TeardownLocalChatInput()
+{
+	if (ChatInputComponent == nullptr)
+	{
+		return;
+	}
+
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	if (OwningPlayerController != nullptr)
+	{
+		OwningPlayerController->PopInputComponent(ChatInputComponent);
+	}
+
+	ChatInputComponent->DestroyComponent();
+	ChatInputComponent = nullptr;
+	CancelInputBindingIndex = INDEX_NONE;
+}
+
+void UMultiplayerChatComponent::HandleActivateChatInput()
+{
+	ActivateChatInput();
+}
+
+void UMultiplayerChatComponent::HandleCancelChatInput()
+{
+	DeactivateChatInput();
 }

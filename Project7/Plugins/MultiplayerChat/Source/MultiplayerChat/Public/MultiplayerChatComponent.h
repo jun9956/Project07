@@ -1,17 +1,26 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "InputCoreTypes.h"
 #include "Components/ActorComponent.h"
 #include "MultiplayerChatTypes.h"
 #include "MultiplayerChatComponent.generated.h"
 
 class UUserWidget;
+class UInputComponent;
 
 // 클라이언트가 채팅 메시지를 수신했을 때 발생하는 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnMultiplayerChatMessageReceived,
 	const FMultiplayerChatMessage&,
 	Message
+);
+
+// 채팅 입력 활성 상태가 변경될 때 발생하는 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnMultiplayerChatInputStateChanged,
+	bool,
+	bIsActive
 );
 
 // 플레이어의 채팅 송수신을 담당하는 네트워크 컴포넌트
@@ -33,6 +42,18 @@ public:
 	// 서버에서 승인된 메시지를 수신할 때 호출되는 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat")
 	FOnMultiplayerChatMessageReceived OnMessageReceived;
+
+	// 채팅 입력을 활성화하고 Game And UI 입력 모드로 변경
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Input")
+	void ActivateChatInput();
+
+	// 채팅 입력을 종료하고 Game Only 입력 모드로 복귀
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Input")
+	void DeactivateChatInput();
+
+	// 채팅 입력 상태가 변경될 때 UI에 알리는 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat|Input")
+	FOnMultiplayerChatInputStateChanged OnChatInputStateChanged;
 
 protected:
 	// 컴포넌트가 게임에 진입하면 로컬 플레이어의 채팅 UI를 생성
@@ -65,4 +86,42 @@ private:
 	// 현재 로컬 플레이어 화면에 생성된 채팅 위젯
 	UPROPERTY(Transient)
 	TObjectPtr<UUserWidget> ChatWidget;
+
+	// 현재 로컬 플레이어가 채팅을 입력 중인지 나타냅니다.
+	bool bIsChatInputActive = false;
+
+	// 로컬 플레이어용 채팅 입력을 생성하고 입력 스택에 등록
+	void SetupLocalChatInput();
+
+	// 생성한 채팅 입력을 입력 스택에서 제거하고 정리
+	void TeardownLocalChatInput();
+
+	// 자동 바인딩된 활성화 키를 처리
+	void HandleActivateChatInput();
+
+	// 자동 바인딩된 취소 키를 처리
+	void HandleCancelChatInput();
+
+	// 플러그인이 채팅 입력 키를 자동으로 등록할지 결정
+	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Input")
+	bool bAutoBindChatInput = true;
+
+	// 채팅 입력을 활성화하는 키
+	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Input")
+	FKey ActivateChatKey = EKeys::Enter;
+
+	// 채팅 입력을 취소하는 키
+	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Input")
+	FKey CancelChatKey = EKeys::Escape;
+
+	// 다른 입력 컴포넌트보다 먼저 채팅 키를 처리하기 위한 우선순위
+	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Input")
+	int32 ChatInputPriority = 100;
+
+	// 로컬 플레이어의 채팅 키 바인딩을 보관하는 입력 컴포넌트
+	UPROPERTY(Transient)
+	TObjectPtr<UInputComponent> ChatInputComponent;
+
+	// Escape 바인딩의 소비 설정을 변경하기 위한 인덱스
+	int32 CancelInputBindingIndex = INDEX_NONE;
 };

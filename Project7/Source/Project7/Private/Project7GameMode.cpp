@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-#include "Project7/Project7GameMode.h"
+#include "Project7GameMode.h"
 
-#include "Project7/Project7Character.h"
+#include "Project7Character.h"
 #include "Project7PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
 

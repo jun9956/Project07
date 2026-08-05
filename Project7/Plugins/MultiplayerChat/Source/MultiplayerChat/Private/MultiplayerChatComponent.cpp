@@ -4,6 +4,8 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogMultiplayerChat, Log, All);
+
 UMultiplayerChatComponent::UMultiplayerChatComponent()
 {
 	
@@ -107,9 +109,18 @@ void UMultiplayerChatComponent::ServerSendGlobalMessage_Implementation(
 	}
 }
 
-void UMultiplayerChatComponent::ClientReceiveMessage_Implementation(
-	const FMultiplayerChatMessage& Message)
+void UMultiplayerChatComponent::ClientReceiveMessage_Implementation(const FMultiplayerChatMessage& Message)
 {
-	// Blueprint와 UMG가 메시지를 표시할 수 있도록 이벤트를 발생.
+	// UI가 없는 상태에서도 수신 결과를 확인할 수 있도록 로그를 출력
+	UE_LOG(
+		LogMultiplayerChat,
+		Log,
+		TEXT("[%s] %s: %s"),
+		*UEnum::GetValueAsString(Message.Channel),
+		*Message.SenderName,
+		*Message.MessageText
+	);
+
+	// Blueprint와 UMG가 메시지를 표시할 수 있도록 이벤트를 발생
 	OnMessageReceived.Broadcast(Message);
 }

@@ -14,6 +14,10 @@ class PROJECT7_API AProject7PlayerController : public APlayerController
 	
 public:
 	AProject7PlayerController();
+	
+	// UI 제작 전에 채팅 송수신을 확인하기 위한 콘솔 명령
+	UFUNCTION(Exec)
+	void ChatTest(const FString& MessageText);
 
 private:
 	// 이 플레이어의 채팅 송수신을 담당하는 컴포넌트

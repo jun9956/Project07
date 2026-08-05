@@ -1,5 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-#include "Project7/Project7Character.h"
+#include "Project7Character.h"
 
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"

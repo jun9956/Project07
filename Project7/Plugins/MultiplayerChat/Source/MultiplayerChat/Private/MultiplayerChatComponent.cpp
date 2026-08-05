@@ -241,8 +241,7 @@ void UMultiplayerChatComponent::SetupLocalChatInput()
 		return;
 	}
 
-	APlayerController* OwningPlayerController =
-		Cast<APlayerController>(GetOwner());
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
 
 	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
 	{

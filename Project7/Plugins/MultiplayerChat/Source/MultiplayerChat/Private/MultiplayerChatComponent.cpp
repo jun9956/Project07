@@ -1,5 +1,6 @@
 ﻿#include "MultiplayerChatComponent.h"
 
+#include "MultiplayerChatIdentityProvider.h"
 #include "Components/InputComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "UObject/ConstructorHelpers.h"
@@ -186,8 +187,8 @@ void UMultiplayerChatComponent::ServerSendGlobalMessage_Implementation(const FSt
 	// 서버가 신뢰할 수 있는 정보로 최종 메시지를 생성
 	FMultiplayerChatMessage ChatMessage;
 	ChatMessage.MessageId = FGuid::NewGuid();
-	ChatMessage.SenderId = FString::FromInt(SenderPlayerState->GetPlayerId());
-	ChatMessage.SenderName = SenderPlayerState->GetPlayerName();
+	ChatMessage.SenderId = ResolvePlayerId(SenderPlayerState);
+	ChatMessage.SenderName = ResolveDisplayName(SenderPlayerState);
 	ChatMessage.Channel = EMultiplayerChatChannel::Global;
 	ChatMessage.ChannelId = TEXT("");
 	ChatMessage.MessageText = SanitizedMessage;
@@ -312,4 +313,62 @@ void UMultiplayerChatComponent::HandleActivateChatInput()
 void UMultiplayerChatComponent::HandleCancelChatInput()
 {
 	DeactivateChatInput();
+}
+
+// 플레이어 ID 결정 함수
+FString UMultiplayerChatComponent::ResolvePlayerId(APlayerState* PlayerState) const
+{
+	if (PlayerState == nullptr)
+	{
+		return FString();
+	}
+
+	const bool bHasIdentityProvider = PlayerState->GetClass()->ImplementsInterface(UMultiplayerChatIdentityProvider::StaticClass());
+
+	if (bHasIdentityProvider)
+	{
+		FString ProviderPlayerId = IMultiplayerChatIdentityProvider::Execute_GetMultiplayerChatPlayerId(PlayerState);
+
+		ProviderPlayerId.TrimStartAndEndInline();
+
+		if (!ProviderPlayerId.IsEmpty())
+		{
+			return ProviderPlayerId;
+		}
+	}
+
+	const FUniqueNetIdRepl& UniqueId = PlayerState->GetUniqueId();
+
+	if (UniqueId.IsValid())
+	{
+		return UniqueId.ToString();
+	}
+
+	// Online Subsystem이 없는 PIE와 LAN 환경에서는 세션 PlayerId를 사용합니다.
+	return FString::FromInt(PlayerState->GetPlayerId());
+}
+
+// 표시 이름 결정 함수
+FString UMultiplayerChatComponent::ResolveDisplayName(APlayerState* PlayerState) const
+{
+	if (PlayerState == nullptr)
+	{
+		return FString();
+	}
+	const bool bHasIdentityProvider = PlayerState->GetClass()->ImplementsInterface(UMultiplayerChatIdentityProvider::StaticClass());
+
+	if (bHasIdentityProvider)
+	{
+		FString ProviderDisplayName = IMultiplayerChatIdentityProvider::Execute_GetMultiplayerChatDisplayName(PlayerState);
+
+		ProviderDisplayName.TrimStartAndEndInline();
+
+		if (!ProviderDisplayName.IsEmpty())
+		{
+			return ProviderDisplayName;
+		}
+	}
+
+	// Identity Provider가 없거나 빈 이름을 반환하면 기본 PlayerState 이름을 사용합니다.
+	return PlayerState->GetPlayerName();
 }

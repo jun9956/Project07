@@ -19,5 +19,12 @@ public class MultiplayerChat : ModuleRules
 				"UMG"
 			}
 		);
+
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"CoreOnline"
+			}
+		);
 	}
 }

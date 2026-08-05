@@ -8,6 +8,7 @@
 
 class UUserWidget;
 class UInputComponent;
+class APlayerState;
 
 // 클라이언트가 채팅 메시지를 수신했을 때 발생하는 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -124,4 +125,10 @@ private:
 
 	// Escape 바인딩의 소비 설정을 변경하기 위한 인덱스
 	int32 CancelInputBindingIndex = INDEX_NONE;
+
+	// 프로젝트 Identity Provider 또는 PlayerState에서 플레이어 ID를 결정
+	FString ResolvePlayerId(APlayerState* PlayerState) const;
+
+	// 프로젝트 Identity Provider 또는 PlayerState에서 표시 이름을 결정
+	FString ResolveDisplayName(APlayerState* PlayerState) const;
 };

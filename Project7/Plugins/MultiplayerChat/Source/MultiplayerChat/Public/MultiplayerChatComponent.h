@@ -57,6 +57,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat")
 	void SendWhisperMessage(const FString& TargetNickname, const FString& MessageText);
 
+	// 새 파티 생성을 서버에 요청
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Party")
+	void CreateParty();
+
+	// 지정한 플레이어가 속한 파티 참가를 서버에 요청
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Party")
+	void JoinParty(const FString& TargetNickname);
+
+	// 현재 파티 탈퇴를 서버에 요청
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Party")
+	void LeaveParty();
+
 	// 서버에서 승인된 메시지를 수신할 때 호출되는 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat")
 	FOnMultiplayerChatMessageReceived OnMessageReceived;
@@ -102,6 +114,18 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerSendWhisperMessage(const FString& TargetNickname, const FString& MessageText);
 
+	// 클라이언트의 파티 생성 요청을 서버에서 처리
+	UFUNCTION(Server, Reliable)
+	void ServerCreateParty();
+
+	// 클라이언트의 파티 참가 요청을 서버에서 처리
+	UFUNCTION(Server, Reliable)
+	void ServerJoinParty(const FString& TargetNickname);
+
+	// 클라이언트의 파티 탈퇴 요청을 서버에서 처리
+	UFUNCTION(Server, Reliable)
+	void ServerLeaveParty();
+
 	// 서버가 특정 클라이언트에 메시지를 전달할 때 사용하는 RPC
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveMessage(const FMultiplayerChatMessage& Message);
@@ -111,7 +135,14 @@ private:
 
 	// 서버에서 도배 방지를 계산하기 위해 사용하는 마지막 전송 시각
 	double LastAcceptedMessageTime = -1.0;
-	
+
+	// 서버가 관리하는 현재 파티의 고유 식별자
+	// 빈 문자열이면 파티에 속하지 않은 상태입니다.
+	FString CurrentPartyId;
+
+	// 파티 명령 반복 요청을 제한하기 위한 마지막 처리 시각
+	double LastPartyCommandTime = -1.0;
+
 	// 컴포넌트가 기본 채팅 UI를 자동 생성할지 결정
 	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|UI")
 	bool bAutoCreateChatWidget = true;

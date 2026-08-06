@@ -143,6 +143,48 @@ bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
 		return true;
 	}
 
+	if (CommandName.Equals(TEXT("party"), ESearchCase::IgnoreCase))
+	{
+		FString PartyCommand;
+		FString PartyArguments;
+
+		if (!Arguments.Split(TEXT(" "), &PartyCommand, &PartyArguments))
+		{
+			PartyCommand = Arguments;
+		}
+
+		PartyCommand.TrimStartAndEndInline();
+		PartyArguments.TrimStartAndEndInline();
+
+		if (
+			PartyCommand.Equals(TEXT("create"), ESearchCase::IgnoreCase) &&
+			PartyArguments.IsEmpty()
+		)
+		{
+			CreateParty();
+			return true;
+		}
+
+		if (PartyCommand.Equals(TEXT("join"), ESearchCase::IgnoreCase))
+		{
+			JoinParty(PartyArguments);
+			return true;
+		}
+
+		if (
+			PartyCommand.Equals(TEXT("leave"), ESearchCase::IgnoreCase) &&
+			PartyArguments.IsEmpty()
+		)
+		{
+			LeaveParty();
+			return true;
+		}
+
+		// 비어 있거나 잘못된 파티 명령은 서버에서 사용법 메시지로 처리합니다.
+		JoinParty(TEXT(""));
+		return true;
+	}
+
 	// 알 수 없는 슬래시 명령어도 전체 채팅에는 노출하지 않습니다.
 	UE_LOG(
 		LogMultiplayerChat,
@@ -187,6 +229,48 @@ void UMultiplayerChatComponent::SendWhisperMessage(const FString& TargetNickname
 	SanitizedMessage.TrimStartAndEndInline();
 
 	ServerSendWhisperMessage(SanitizedTargetNickname, SanitizedMessage);
+}
+
+void UMultiplayerChatComponent::CreateParty()
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 소유 로컬 플레이어만 파티 생성을 요청할 수 있습니다.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	ServerCreateParty();
+}
+
+void UMultiplayerChatComponent::JoinParty(const FString& TargetNickname)
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 소유 로컬 플레이어만 파티 참가를 요청할 수 있습니다.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	FString SanitizedTargetNickname = TargetNickname;
+	SanitizedTargetNickname.TrimStartAndEndInline();
+
+	ServerJoinParty(SanitizedTargetNickname);
+}
+
+void UMultiplayerChatComponent::LeaveParty()
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 소유 로컬 플레이어만 파티 탈퇴를 요청할 수 있습니다.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	ServerLeaveParty();
 }
 
 void UMultiplayerChatComponent::ActivateChatInput()
@@ -500,6 +584,218 @@ void UMultiplayerChatComponent::ServerSendWhisperMessage_Implementation(
 	// 귓속말은 발신자와 수신자에게만 전달합니다.
 	ClientReceiveMessage(WhisperMessage);
 	RecipientChatComponent->ClientReceiveMessage(WhisperMessage);
+}
+
+void UMultiplayerChatComponent::ServerCreateParty_Implementation()
+{
+	constexpr double MinimumPartyCommandInterval = 0.5;
+
+	UWorld* World = GetWorld();
+	APlayerController* RequestingController = Cast<APlayerController>(GetOwner());
+
+	if (
+		World == nullptr ||
+		RequestingController == nullptr ||
+		RequestingController->PlayerState == nullptr
+	)
+	{
+		return;
+	}
+
+	const double CurrentTime = World->GetTimeSeconds();
+
+	// 파티 명령을 지나치게 빠르게 반복할 수 없도록 제한
+	if (
+		LastPartyCommandTime >= 0.0 &&
+		CurrentTime - LastPartyCommandTime < MinimumPartyCommandInterval
+	)
+	{
+		SendSystemMessageToOwner(TEXT("파티 명령은 잠시 후 다시 시도해주세요."));
+		return;
+	}
+
+	LastPartyCommandTime = CurrentTime;
+
+	// 이미 파티에 속한 플레이어는 새 파티를 생성할 수 없습니다.
+	if (!CurrentPartyId.IsEmpty())
+	{
+		SendSystemMessageToOwner(TEXT("이미 파티에 참가하고 있습니다."));
+		return;
+	}
+
+	// 서버가 예측하기 어려운 고유 파티 식별자를 생성
+	CurrentPartyId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
+
+	SendSystemMessageToOwner(TEXT("파티를 생성했습니다."));
+}
+
+void UMultiplayerChatComponent::ServerJoinParty_Implementation(const FString& TargetNickname)
+{
+	constexpr double MinimumPartyCommandInterval = 0.5;
+
+	UWorld* World = GetWorld();
+	APlayerController* RequestingController = Cast<APlayerController>(GetOwner());
+
+	if (
+		World == nullptr ||
+		RequestingController == nullptr ||
+		RequestingController->PlayerState == nullptr
+	)
+	{
+		return;
+	}
+
+	FString SanitizedTargetNickname = TargetNickname;
+	SanitizedTargetNickname.TrimStartAndEndInline();
+
+	const double CurrentTime = World->GetTimeSeconds();
+
+	// 파티 명령을 지나치게 빠르게 반복할 수 없도록 제한합니다.
+	if (
+		LastPartyCommandTime >= 0.0 && CurrentTime - LastPartyCommandTime < MinimumPartyCommandInterval)
+	{
+		SendSystemMessageToOwner(TEXT("파티 명령은 잠시 후 다시 시도해주세요."));
+		return;
+	}
+
+	LastPartyCommandTime = CurrentTime;
+
+	if (SanitizedTargetNickname.IsEmpty())
+	{
+		SendSystemMessageToOwner(
+			TEXT("사용법: /party create | /party join 닉네임 | /party leave")
+		);
+		return;
+	}
+
+	if (SanitizedTargetNickname.Len() > MaximumNicknameLength)
+	{
+		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		return;
+	}
+
+	// 이미 파티에 속한 플레이어는 다른 파티에 참가할 수 없습니다.
+	if (!CurrentPartyId.IsEmpty())
+	{
+		SendSystemMessageToOwner(TEXT("이미 파티에 참가하고 있습니다."));
+		return;
+	}
+
+	APlayerController* TargetController = nullptr;
+	FString TargetDisplayName;
+	int32 MatchingPlayerCount = 0;
+
+	// 서버가 현재 접속한 플레이어의 표시 이름으로 참가 대상을 검색합니다.
+	for (
+		FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator();
+		Iterator;
+		++Iterator
+	)
+	{
+		APlayerController* CandidateController = Iterator->Get();
+
+		if (CandidateController == nullptr || CandidateController->PlayerState == nullptr)
+		{
+			continue;
+		}
+
+		const FString CandidateDisplayName = ResolveDisplayName(
+			CandidateController->PlayerState
+		);
+
+		if (!CandidateDisplayName.Equals(SanitizedTargetNickname, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		++MatchingPlayerCount;
+		TargetController = CandidateController;
+		TargetDisplayName = CandidateDisplayName;
+	}
+
+	if (MatchingPlayerCount == 0)
+	{
+		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		return;
+	}
+
+	if (MatchingPlayerCount > 1)
+	{
+		SendSystemMessageToOwner(
+			TEXT("같은 닉네임의 플레이어가 여러 명 있어 파티에 참가할 수 없습니다.")
+		);
+		return;
+	}
+
+	if (TargetController == RequestingController)
+	{
+		SendSystemMessageToOwner(TEXT("자기 자신을 대상으로 파티에 참가할 수 없습니다."));
+		return;
+	}
+
+	UMultiplayerChatComponent* TargetChatComponent = TargetController->FindComponentByClass<UMultiplayerChatComponent>();
+
+	if (TargetChatComponent == nullptr)
+	{
+		SendSystemMessageToOwner(TEXT("대상 플레이어가 파티 기능을 사용할 수 없습니다."));
+		return;
+	}
+
+	if (TargetChatComponent->CurrentPartyId.IsEmpty())
+	{
+		SendSystemMessageToOwner(TEXT("대상 플레이어가 파티에 참가하고 있지 않습니다."));
+		return;
+	}
+
+	// 서버가 대상 플레이어의 검증된 파티 식별자를 참가자에게 복사합니다.
+	CurrentPartyId = TargetChatComponent->CurrentPartyId;
+
+	SendSystemMessageToOwner(
+		FString::Printf(
+			TEXT("%s님의 파티에 참가했습니다."),
+			*TargetDisplayName
+		)
+	);
+}
+
+void UMultiplayerChatComponent::ServerLeaveParty_Implementation()
+{
+	constexpr double MinimumPartyCommandInterval = 0.5;
+
+	UWorld* World = GetWorld();
+	APlayerController* RequestingController = Cast<APlayerController>(GetOwner());
+
+	if (
+		World == nullptr ||
+		RequestingController == nullptr ||
+		RequestingController->PlayerState == nullptr
+	)
+	{
+		return;
+	}
+
+	const double CurrentTime = World->GetTimeSeconds();
+
+	// 파티 명령을 지나치게 빠르게 반복할 수 없도록 제한합니다.
+	if (LastPartyCommandTime >= 0.0 && CurrentTime - LastPartyCommandTime < MinimumPartyCommandInterval)
+	{
+		SendSystemMessageToOwner(TEXT("파티 명령은 잠시 후 다시 시도해주세요."));
+		return;
+	}
+
+	LastPartyCommandTime = CurrentTime;
+
+	// 파티에 참가하지 않은 플레이어는 탈퇴할 수 없습니다.
+	if (CurrentPartyId.IsEmpty())
+	{
+		SendSystemMessageToOwner(TEXT("현재 참가하고 있는 파티가 없습니다."));
+		return;
+	}
+
+	// 서버가 관리하는 파티 소속 정보를 제거합니다.
+	CurrentPartyId.Empty();
+
+	SendSystemMessageToOwner(TEXT("파티에서 탈퇴했습니다."));
 }
 
 void UMultiplayerChatComponent::ClientReceiveMessage_Implementation(const FMultiplayerChatMessage& Message)

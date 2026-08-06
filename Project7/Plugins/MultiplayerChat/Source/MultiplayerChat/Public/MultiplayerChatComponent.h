@@ -52,7 +52,11 @@ public:
 	// 전체 채팅 메시지를 서버로 전송
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat")
 	void SendGlobalMessage(const FString& MessageText);
-	
+
+	// 지정한 닉네임의 플레이어에게 귓속말을 전송
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat")
+	void SendWhisperMessage(const FString& TargetNickname, const FString& MessageText);
+
 	// 서버에서 승인된 메시지를 수신할 때 호출되는 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat")
 	FOnMultiplayerChatMessageReceived OnMessageReceived;
@@ -94,9 +98,16 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerSendGlobalMessage(const FString& MessageText);
 
+	// 클라이언트가 서버에 귓속말 전송을 요청할 때 사용하는 RPC
+	UFUNCTION(Server, Reliable)
+	void ServerSendWhisperMessage(const FString& TargetNickname, const FString& MessageText);
+
 	// 서버가 특정 클라이언트에 메시지를 전달할 때 사용하는 RPC
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveMessage(const FMultiplayerChatMessage& Message);
+
+	// 서버 처리 결과를 소유 클라이언트의 시스템 메시지로 전달
+	void SendSystemMessageToOwner(const FString& MessageText);
 
 	// 서버에서 도배 방지를 계산하기 위해 사용하는 마지막 전송 시각
 	double LastAcceptedMessageTime = -1.0;

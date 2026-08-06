@@ -126,6 +126,23 @@ bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
 		return true;
 	}
 
+	if (CommandName.Equals(TEXT("w"), ESearchCase::IgnoreCase))
+	{
+		FString TargetNickname;
+		FString WhisperMessage;
+
+		if (!Arguments.Split(TEXT(" "), &TargetNickname, &WhisperMessage))
+		{
+			TargetNickname = Arguments;
+		}
+
+		TargetNickname.TrimStartAndEndInline();
+		WhisperMessage.TrimStartAndEndInline();
+
+		SendWhisperMessage(TargetNickname, WhisperMessage);
+		return true;
+	}
+
 	// 알 수 없는 슬래시 명령어도 전체 채팅에는 노출하지 않습니다.
 	UE_LOG(
 		LogMultiplayerChat,
@@ -151,6 +168,25 @@ void UMultiplayerChatComponent::SendGlobalMessage(const FString& MessageText)
 
 	// 소유 클라이언트에서 서버 RPC를 호출
 	ServerSendGlobalMessage(TrimmedMessage);
+}
+
+void UMultiplayerChatComponent::SendWhisperMessage(const FString& TargetNickname, const FString& MessageText)
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 소유 로컬 플레이어만 귓속말을 요청할 수 있습니다.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	FString SanitizedTargetNickname = TargetNickname;
+	SanitizedTargetNickname.TrimStartAndEndInline();
+
+	FString SanitizedMessage = MessageText;
+	SanitizedMessage.TrimStartAndEndInline();
+
+	ServerSendWhisperMessage(SanitizedTargetNickname, SanitizedMessage);
 }
 
 void UMultiplayerChatComponent::ActivateChatInput()
@@ -300,6 +336,170 @@ void UMultiplayerChatComponent::ServerSendGlobalMessage_Implementation(const FSt
 		// 각 PlayerController의 소유 클라이언트로 메시지를 전송
 		TargetChatComponent->ClientReceiveMessage(ChatMessage);
 	}
+}
+
+void UMultiplayerChatComponent::SendSystemMessageToOwner(const FString& MessageText)
+{
+	AActor* OwnerActor = GetOwner();
+
+	// 시스템 메시지는 서버에서만 생성합니다.
+	if (OwnerActor == nullptr || !OwnerActor->HasAuthority())
+	{
+		return;
+	}
+
+	FString SanitizedMessage = MessageText;
+	SanitizedMessage.TrimStartAndEndInline();
+
+	if (SanitizedMessage.IsEmpty())
+	{
+		return;
+	}
+
+	FMultiplayerChatMessage SystemMessage;
+	SystemMessage.MessageId = FGuid::NewGuid();
+	SystemMessage.SenderId = TEXT("");
+	SystemMessage.SenderName = TEXT("System");
+	SystemMessage.Channel = EMultiplayerChatChannel::System;
+	SystemMessage.ChannelId = TEXT("");
+	SystemMessage.ChannelDisplayName = TEXT("System");
+	SystemMessage.MessageText = SanitizedMessage;
+	SystemMessage.ServerTimestamp = FDateTime::UtcNow();
+
+	ClientReceiveMessage(SystemMessage);
+}
+
+void UMultiplayerChatComponent::ServerSendWhisperMessage_Implementation(
+	const FString& TargetNickname,
+	const FString& MessageText
+)
+{
+	constexpr int32 MaximumMessageLength = 256;
+	constexpr double MinimumMessageInterval = 0.5;
+
+	UWorld* World = GetWorld();
+	APlayerController* SenderController = Cast<APlayerController>(GetOwner());
+	APlayerState* SenderPlayerState = SenderController != nullptr ? SenderController->PlayerState : nullptr;
+
+	if (World == nullptr || SenderController == nullptr || SenderPlayerState == nullptr)
+	{
+		return;
+	}
+
+	FString SanitizedTargetNickname = TargetNickname;
+	SanitizedTargetNickname.TrimStartAndEndInline();
+
+	FString SanitizedMessage = MessageText;
+	SanitizedMessage.TrimStartAndEndInline();
+
+	const double CurrentTime = World->GetTimeSeconds();
+
+	// 전체 채팅과 동일한 전송 간격 제한을 공유
+	if (
+		LastAcceptedMessageTime >= 0.0 && CurrentTime - LastAcceptedMessageTime < MinimumMessageInterval)
+	{
+		return;
+	}
+
+	// 잘못된 대상 검색 요청도 반복할 수 없도록 요청 시각을 기록
+	LastAcceptedMessageTime = CurrentTime;
+
+	if (SanitizedTargetNickname.IsEmpty() || SanitizedMessage.IsEmpty())
+	{
+		SendSystemMessageToOwner(TEXT("사용법: /w 닉네임 메시지"));
+		return;
+	}
+
+	if (SanitizedMessage.Len() > MaximumMessageLength)
+	{
+		SendSystemMessageToOwner(TEXT("귓속말은 256자 이하로 입력해주세요."));
+		return;
+	}
+
+	if (SanitizedTargetNickname.Len() > MaximumNicknameLength)
+	{
+		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		return;
+	}
+
+	APlayerController* RecipientController = nullptr;
+	APlayerState* RecipientPlayerState = nullptr;
+	FString RecipientDisplayName;
+	int32 MatchingPlayerCount = 0;
+
+	// 서버가 현재 접속한 플레이어의 표시 이름으로 수신자를 검색합니다.
+	for (
+		FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator();
+		Iterator;
+		++Iterator
+	)
+	{
+		APlayerController* CandidateController = Iterator->Get();
+
+		if (CandidateController == nullptr || CandidateController->PlayerState == nullptr)
+		{
+			continue;
+		}
+
+		const FString CandidateDisplayName = ResolveDisplayName(CandidateController->PlayerState);
+
+		if (!CandidateDisplayName.Equals(
+			SanitizedTargetNickname,
+			ESearchCase::IgnoreCase
+		))
+		{
+			continue;
+		}
+
+		++MatchingPlayerCount;
+		RecipientController = CandidateController;
+		RecipientPlayerState = CandidateController->PlayerState;
+		RecipientDisplayName = CandidateDisplayName;
+	}
+
+	if (MatchingPlayerCount == 0)
+	{
+		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		return;
+	}
+
+	// 외부 Identity Provider가 중복 이름을 제공하면 잘못된 대상에게 보내지 않습니다.
+	if (MatchingPlayerCount > 1)
+	{
+		SendSystemMessageToOwner(
+			TEXT("같은 닉네임의 플레이어가 여러 명 있어 귓속말을 보낼 수 없습니다.")
+		);
+		return;
+	}
+
+	if (RecipientController == SenderController)
+	{
+		SendSystemMessageToOwner(TEXT("자기 자신에게는 귓속말을 보낼 수 없습니다."));
+		return;
+	}
+
+	UMultiplayerChatComponent* RecipientChatComponent = RecipientController->FindComponentByClass<UMultiplayerChatComponent>();
+
+	if (RecipientChatComponent == nullptr || RecipientPlayerState == nullptr)
+	{
+		SendSystemMessageToOwner(TEXT("대상 플레이어가 채팅을 사용할 수 없습니다."));
+		return;
+	}
+
+	// 서버가 검증한 발신자와 수신자 정보로 귓속말을 생성합니다.
+	FMultiplayerChatMessage WhisperMessage;
+	WhisperMessage.MessageId = FGuid::NewGuid();
+	WhisperMessage.SenderId = ResolvePlayerId(SenderPlayerState);
+	WhisperMessage.SenderName = ResolveDisplayName(SenderPlayerState);
+	WhisperMessage.Channel = EMultiplayerChatChannel::Whisper;
+	WhisperMessage.ChannelId = ResolvePlayerId(RecipientPlayerState);
+	WhisperMessage.ChannelDisplayName = RecipientDisplayName;
+	WhisperMessage.MessageText = SanitizedMessage;
+	WhisperMessage.ServerTimestamp = FDateTime::UtcNow();
+
+	// 귓속말은 발신자와 수신자에게만 전달합니다.
+	ClientReceiveMessage(WhisperMessage);
+	RecipientChatComponent->ClientReceiveMessage(WhisperMessage);
 }
 
 void UMultiplayerChatComponent::ClientReceiveMessage_Implementation(const FMultiplayerChatMessage& Message)

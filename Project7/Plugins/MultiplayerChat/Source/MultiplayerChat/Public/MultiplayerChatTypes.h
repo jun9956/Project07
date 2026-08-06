@@ -58,6 +58,11 @@ struct MULTIPLAYERCHAT_API FMultiplayerChatMessage
 	UPROPERTY(BlueprintReadOnly, Category = "Multiplayer Chat")
 	FString ChannelId;
 
+	// 채널을 UI에 표시할 때 사용할 이름
+	// 귓속말에서는 수신자 이름, 파티에서는 파티 이름이나 참가 코드를 사용합니다.
+	UPROPERTY(BlueprintReadOnly, Category = "Multiplayer Chat")
+	FString ChannelDisplayName;
+
 	// 실제로 채팅창에 표시할 메시지 내용
 	UPROPERTY(BlueprintReadOnly, Category = "Multiplayer Chat")
 	FString MessageText;

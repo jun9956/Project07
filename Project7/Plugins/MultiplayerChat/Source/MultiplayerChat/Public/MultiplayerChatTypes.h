@@ -3,12 +3,10 @@
 #include "CoreMinimal.h"
 #include "MultiplayerChatTypes.generated.h"
 
-/**
- * 채팅 메시지가 전달되는 채널의 종류입니다.
- *
- * BlueprintType을 사용했기 때문에 블루프린트와 UMG에서도
- * 채널 값을 선택하고 확인할 수 있습니다.
- */
+// 채팅 메시지가 전달되는 채널의 종류입니다.
+//
+// BlueprintType을 사용했기 때문에 블루프린트와 UMG에서도
+// 채널 값을 선택하고 확인할 수 있습니다.
 UENUM(BlueprintType)
 enum class EMultiplayerChatChannel : uint8
 {

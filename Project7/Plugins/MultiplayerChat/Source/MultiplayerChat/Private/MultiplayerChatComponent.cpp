@@ -77,6 +77,66 @@ void UMultiplayerChatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 	Super::EndPlay(EndPlayReason);
 }
 
+void UMultiplayerChatComponent::SubmitChatInput(const FString& InputText)
+{
+	// 입력의 앞뒤 공백을 한 번만 정리합니다.
+	FString TrimmedInput = InputText;
+	TrimmedInput.TrimStartAndEndInline();
+
+	if (TrimmedInput.IsEmpty())
+	{
+		return;
+	}
+
+	// 명령어로 처리된 입력은 전체 채팅으로 전송하지 않습니다.
+	if (TryHandleChatCommand(TrimmedInput))
+	{
+		return;
+	}
+
+	SendGlobalMessage(TrimmedInput);
+}
+
+bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
+{
+	// 슬래시로 시작하지 않으면 일반 채팅입니다.
+	if (!InputText.StartsWith(TEXT("/")))
+	{
+		return false;
+	}
+
+	// 첫 슬래시를 제거하고 명령어 이름과 나머지 인수를 분리합니다.
+	FString CommandLine = InputText.Mid(1);
+	CommandLine.TrimStartAndEndInline();
+
+	FString CommandName;
+	FString Arguments;
+
+	if (!CommandLine.Split(TEXT(" "), &CommandName, &Arguments))
+	{
+		CommandName = CommandLine;
+	}
+
+	CommandName.TrimStartAndEndInline();
+	Arguments.TrimStartAndEndInline();
+
+	if (CommandName.Equals(TEXT("nick"), ESearchCase::IgnoreCase))
+	{
+		RequestNicknameChange(Arguments);
+		return true;
+	}
+
+	// 알 수 없는 슬래시 명령어도 전체 채팅에는 노출하지 않습니다.
+	UE_LOG(
+		LogMultiplayerChat,
+		Warning,
+		TEXT("Unknown chat command: /%s"),
+		*CommandName
+	);
+
+	return true;
+}
+
 void UMultiplayerChatComponent::SendGlobalMessage(const FString& MessageText)
 {
 	// 사용자 입력의 앞뒤 공백을 제거
@@ -435,6 +495,19 @@ void UMultiplayerChatComponent::ServerRequestNicknameChange_Implementation(const
 		}
 	}
 
+	// 0보다 큰 제한값을 사용하고 성공 횟수가 한도에 도달했다면 요청을 거부합니다.
+	if (
+		MaxNicknameChangesPerSession > 0
+		&& SuccessfulNicknameChangesThisSession >= MaxNicknameChangesPerSession
+	)
+	{
+		ClientReceiveNicknameChangeResult(
+			EMultiplayerChatNicknameResult::ChangeLimitReached,
+			SanitizedNickname
+		);
+		return;
+	}
+
 	const double CurrentTime = World->GetTimeSeconds();
 
 	// 너무 빠른 닉네임 변경 요청을 거부합니다.
@@ -500,10 +573,12 @@ void UMultiplayerChatComponent::ServerRequestNicknameChange_Implementation(const
 			return;
 		}
 	}
-
 	// 검증에 통과한 이름을 서버의 PlayerState에 적용합니다.
 	SenderPlayerState->SetPlayerName(SanitizedNickname);
 	SenderPlayerState->ForceNetUpdate();
+
+	// PlayerState에 이름을 적용한 뒤에만 성공 횟수를 증가시킵니다.
+	++SuccessfulNicknameChangesThisSession;
 
 	ClientReceiveNicknameChangeResult(EMultiplayerChatNicknameResult::Success,SanitizedNickname);
 }

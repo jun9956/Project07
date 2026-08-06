@@ -45,6 +45,10 @@ class MULTIPLAYERCHAT_API UMultiplayerChatComponent : public UActorComponent
 public:
 	UMultiplayerChatComponent();
 
+	// 채팅 입력을 명령어 또는 일반 메시지로 구분하여 처리
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat")
+	void SubmitChatInput(const FString& InputText);
+
 	// 전체 채팅 메시지를 서버로 전송
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat")
 	void SendGlobalMessage(const FString& MessageText);
@@ -81,11 +85,15 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	
 private:
-	
+
+	// 슬래시 명령어를 분석하고 처리
+	// 입력을 명령어로 소비했다면 true를 반환
+	bool TryHandleChatCommand(const FString& InputText);
+
 	// 클라이언트가 서버로 메시지를 보낼 때 사용하는 RPC
 	UFUNCTION(Server, Reliable)
 	void ServerSendGlobalMessage(const FString& MessageText);
-	
+
 	// 서버가 특정 클라이언트에 메시지를 전달할 때 사용하는 RPC
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveMessage(const FMultiplayerChatMessage& Message);
@@ -161,6 +169,11 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Identity")
 	bool bAllowClientNicknameChanges = true;
 
+	// 한 번의 접속 세션에서 허용할 최대 닉네임 변경 성공 횟수
+	// 0이면 변경 횟수를 제한하지 않습니다.
+	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Identity", meta = (ClampMin = "0"))
+	int32 MaxNicknameChangesPerSession = 1;
+
 	// 허용할 최소 닉네임 길이
 	UPROPERTY(EditDefaultsOnly,Category = "Multiplayer Chat|Identity",meta = (ClampMin = "1"))
 	int32 MinimumNicknameLength = 2;
@@ -176,6 +189,9 @@ private:
 	// 플레이어가 사용할 수 없는 예약 닉네임
 	UPROPERTY(EditDefaultsOnly, Category = "Multiplayer Chat|Identity")
 	TArray<FString> ReservedNicknames;
+
+	// 서버에서 관리하는 현재 세션의 닉네임 변경 성공 횟수
+	int32 SuccessfulNicknameChangesThisSession = 0;
 
 	// 서버에서 도배 방지를 계산하기 위한 마지막 닉네임 요청 시각
 	double LastNicknameChangeRequestTime = -1.0;

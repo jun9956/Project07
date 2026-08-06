@@ -31,7 +31,8 @@ enum class EMultiplayerChatNicknameResult : uint8
 	AlreadyInUse      UMETA(DisplayName = "Already In Use"),
 	ReservedName      UMETA(DisplayName = "Reserved Name"),
 	RateLimited       UMETA(DisplayName = "Rate Limited"),
-	Unavailable		  UMETA(DisplayName = "Unavailable")
+	Unavailable		  UMETA(DisplayName = "Unavailable"),
+	ChangeLimitReached UMETA(DisplayName = "Change Limit Reached")
 };
 
 USTRUCT(BlueprintType)

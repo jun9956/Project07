@@ -24,6 +24,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	bIsActive
 );
 
+// 로컬 플레이어의 기본 발신 채널이 변경될 때 발생하는 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnMultiplayerChatActiveChannelChanged,
+	EMultiplayerChatChannel,
+	Channel
+);
+
 // 서버가 닉네임 변경 요청을 처리한 뒤 로컬 UI에 결과를 전달
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnMultiplayerChatNicknameChangeResult,
@@ -69,6 +76,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Party")
 	void LeaveParty();
 
+	// 현재 파티에 채팅 메시지를 전송
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat|Party")
+	void SendPartyMessage(const FString& MessageText);
+
+	// 현재 기본 발신 채널을 반환
+	UFUNCTION(BlueprintPure, Category = "Multiplayer Chat|Channel")
+	EMultiplayerChatChannel GetActiveChatChannel() const;
+
+	// 기본 발신 채널이 변경될 때 UI에 알리는 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat|Channel")
+	FOnMultiplayerChatActiveChannelChanged OnActiveChannelChanged;
+
 	// 서버에서 승인된 메시지를 수신할 때 호출되는 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Multiplayer Chat")
 	FOnMultiplayerChatMessageReceived OnMessageReceived;
@@ -106,6 +125,9 @@ private:
 	// 입력을 명령어로 소비했다면 true를 반환
 	bool TryHandleChatCommand(const FString& InputText);
 
+	// 로컬 플레이어의 기본 발신 채널을 변경
+	void SetActiveChatChannel(EMultiplayerChatChannel NewChannel);
+
 	// 클라이언트가 서버로 메시지를 보낼 때 사용하는 RPC
 	UFUNCTION(Server, Reliable)
 	void ServerSendGlobalMessage(const FString& MessageText);
@@ -113,6 +135,10 @@ private:
 	// 클라이언트가 서버에 귓속말 전송을 요청할 때 사용하는 RPC
 	UFUNCTION(Server, Reliable)
 	void ServerSendWhisperMessage(const FString& TargetNickname, const FString& MessageText);
+
+	// 클라이언트가 서버에 파티 메시지 전송을 요청할 때 사용하는 RPC
+	UFUNCTION(Server, Reliable)
+	void ServerSendPartyMessage(const FString& MessageText);
 
 	// 클라이언트의 파티 생성 요청을 서버에서 처리
 	UFUNCTION(Server, Reliable)
@@ -139,6 +165,9 @@ private:
 	// 서버가 관리하는 현재 파티의 고유 식별자
 	// 빈 문자열이면 파티에 속하지 않은 상태입니다.
 	FString CurrentPartyId;
+
+	// 명령어가 아닌 일반 메시지를 전송할 기본 채널
+	EMultiplayerChatChannel ActiveChatChannel = EMultiplayerChatChannel::Global;
 
 	// 파티 명령 반복 요청을 제한하기 위한 마지막 처리 시각
 	double LastPartyCommandTime = -1.0;

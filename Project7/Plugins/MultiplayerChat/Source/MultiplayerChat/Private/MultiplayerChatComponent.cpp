@@ -94,7 +94,46 @@ void UMultiplayerChatComponent::SubmitChatInput(const FString& InputText)
 		return;
 	}
 
+	if (ActiveChatChannel == EMultiplayerChatChannel::Party)
+	{
+		SendPartyMessage(TrimmedInput);
+		return;
+	}
+
 	SendGlobalMessage(TrimmedInput);
+}
+
+EMultiplayerChatChannel UMultiplayerChatComponent::GetActiveChatChannel() const
+{
+	return ActiveChatChannel;
+}
+
+void UMultiplayerChatComponent::SetActiveChatChannel(EMultiplayerChatChannel NewChannel)
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 소유 로컬 플레이어의 발신 채널만 변경할 수 있습니다.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	// 현재 입력 모드에서는 전체와 파티 채널만 기본 발신 채널로 사용합니다.
+	if (
+		NewChannel != EMultiplayerChatChannel::Global &&
+		NewChannel != EMultiplayerChatChannel::Party
+	)
+	{
+		return;
+	}
+
+	if (ActiveChatChannel == NewChannel)
+	{
+		return;
+	}
+
+	ActiveChatChannel = NewChannel;
+	OnActiveChannelChanged.Broadcast(ActiveChatChannel);
 }
 
 bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
@@ -140,6 +179,30 @@ bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
 		WhisperMessage.TrimStartAndEndInline();
 
 		SendWhisperMessage(TargetNickname, WhisperMessage);
+		return true;
+	}
+
+	if (CommandName.Equals(TEXT("p"), ESearchCase::IgnoreCase))
+	{
+		SetActiveChatChannel(EMultiplayerChatChannel::Party);
+
+		if (!Arguments.IsEmpty())
+		{
+			SendPartyMessage(Arguments);
+		}
+
+		return true;
+	}
+
+	if (CommandName.Equals(TEXT("g"), ESearchCase::IgnoreCase))
+	{
+		SetActiveChatChannel(EMultiplayerChatChannel::Global);
+
+		if (!Arguments.IsEmpty())
+		{
+			SendGlobalMessage(Arguments);
+		}
+
 		return true;
 	}
 
@@ -271,6 +334,24 @@ void UMultiplayerChatComponent::LeaveParty()
 	}
 
 	ServerLeaveParty();
+
+	SetActiveChatChannel(EMultiplayerChatChannel::Global);
+}
+
+void UMultiplayerChatComponent::SendPartyMessage(const FString& MessageText)
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	// 소유 로컬 플레이어만 파티 메시지를 요청할 수 있습니다.
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	FString SanitizedMessage = MessageText;
+	SanitizedMessage.TrimStartAndEndInline();
+
+	ServerSendPartyMessage(SanitizedMessage);
 }
 
 void UMultiplayerChatComponent::ActivateChatInput()
@@ -584,6 +665,95 @@ void UMultiplayerChatComponent::ServerSendWhisperMessage_Implementation(
 	// 귓속말은 발신자와 수신자에게만 전달합니다.
 	ClientReceiveMessage(WhisperMessage);
 	RecipientChatComponent->ClientReceiveMessage(WhisperMessage);
+}
+
+void UMultiplayerChatComponent::ServerSendPartyMessage_Implementation(const FString& MessageText)
+{
+	constexpr int32 MaximumMessageLength = 256;
+	constexpr double MinimumMessageInterval = 0.5;
+
+	UWorld* World = GetWorld();
+	APlayerController* SenderController = Cast<APlayerController>(GetOwner());
+	APlayerState* SenderPlayerState = SenderController != nullptr ? SenderController->PlayerState : nullptr;
+
+	if (
+		World == nullptr ||
+		SenderController == nullptr ||
+		SenderPlayerState == nullptr
+	)
+	{
+		return;
+	}
+
+	FString SanitizedMessage = MessageText;
+	SanitizedMessage.TrimStartAndEndInline();
+
+	const double CurrentTime = World->GetTimeSeconds();
+
+	// 전체 채팅과 귓속말의 전송 간격 제한을 공유합니다.
+	if (LastAcceptedMessageTime >= 0.0 && CurrentTime - LastAcceptedMessageTime < MinimumMessageInterval)
+	{
+		return;
+	}
+
+	// 잘못된 파티 메시지 반복도 제한하도록 요청 시각을 기록합니다.
+	LastAcceptedMessageTime = CurrentTime;
+
+	if (SanitizedMessage.IsEmpty())
+	{
+		SendSystemMessageToOwner(TEXT("사용법: /p 메시지"));
+		return;
+	}
+
+	if (SanitizedMessage.Len() > MaximumMessageLength)
+	{
+		SendSystemMessageToOwner(TEXT("파티 메시지는 256자 이하로 입력해주세요."));
+		return;
+	}
+
+	if (CurrentPartyId.IsEmpty())
+	{
+		SendSystemMessageToOwner(
+			TEXT("파티 채팅을 사용하려면 먼저 파티에 참가해야 합니다.")
+		);
+		return;
+	}
+
+	// 서버가 검증한 발신자와 파티 정보로 메시지를 생성합니다.
+	FMultiplayerChatMessage PartyMessage;
+	PartyMessage.MessageId = FGuid::NewGuid();
+	PartyMessage.SenderId = ResolvePlayerId(SenderPlayerState);
+	PartyMessage.SenderName = ResolveDisplayName(SenderPlayerState);
+	PartyMessage.Channel = EMultiplayerChatChannel::Party;
+	PartyMessage.ChannelId = CurrentPartyId;
+	PartyMessage.ChannelDisplayName = TEXT("Party");
+	PartyMessage.MessageText = SanitizedMessage;
+	PartyMessage.ServerTimestamp = FDateTime::UtcNow();
+
+	// 같은 서버 파티 식별자를 가진 플레이어에게만 메시지를 전달합니다.
+	for (
+		FConstPlayerControllerIterator Iterator =
+			World->GetPlayerControllerIterator();
+		Iterator;
+		++Iterator
+	)
+	{
+		APlayerController* TargetController = Iterator->Get();
+
+		if (TargetController == nullptr)
+		{
+			continue;
+		}
+
+		UMultiplayerChatComponent* TargetChatComponent = TargetController->FindComponentByClass<UMultiplayerChatComponent>();
+
+		if (TargetChatComponent == nullptr || TargetChatComponent->CurrentPartyId != CurrentPartyId)
+		{
+			continue;
+		}
+
+		TargetChatComponent->ClientReceiveMessage(PartyMessage);
+	}
 }
 
 void UMultiplayerChatComponent::ServerCreateParty_Implementation()

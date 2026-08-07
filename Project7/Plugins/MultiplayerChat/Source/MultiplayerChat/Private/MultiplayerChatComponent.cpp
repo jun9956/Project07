@@ -37,6 +37,11 @@ void UMultiplayerChatComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	EnsureLocalChatInitialized();
+}
+
+void UMultiplayerChatComponent::EnsureLocalChatInitialized()
+{
 	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
 
 	// 로컬 PlayerController에서만 UI와 입력을 준비합니다.
@@ -47,9 +52,14 @@ void UMultiplayerChatComponent::BeginPlay()
 
 	if (bAutoCreateChatWidget && ChatWidgetClass != nullptr)
 	{
-		ChatWidget = CreateWidget<UUserWidget>(OwningPlayerController,ChatWidgetClass);
+		// 레벨 전환으로 기존 위젯이 제거됐다면 다시 생성합니다.
+		if (!IsValid(ChatWidget))
+		{
+			ChatWidget = CreateWidget<UUserWidget>(OwningPlayerController,ChatWidgetClass);
+		}
 
-		if (ChatWidget != nullptr)
+		// 위젯이 존재하지만 화면에서 제거된 경우 다시 표시합니다.
+		if (IsValid(ChatWidget) && !ChatWidget->IsInViewport())
 		{
 			ChatWidget->AddToPlayerScreen();
 		}

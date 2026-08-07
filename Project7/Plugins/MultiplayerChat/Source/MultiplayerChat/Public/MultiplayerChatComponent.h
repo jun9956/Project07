@@ -52,6 +52,9 @@ class MULTIPLAYERCHAT_API UMultiplayerChatComponent : public UActorComponent
 public:
 	UMultiplayerChatComponent();
 
+	// 레벨 전환 후 로컬 채팅 UI와 입력을 다시 준비합니다.
+	void EnsureLocalChatInitialized();
+
 	// 채팅 입력을 명령어 또는 일반 메시지로 구분하여 처리
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer Chat")
 	void SubmitChatInput(const FString& InputText);

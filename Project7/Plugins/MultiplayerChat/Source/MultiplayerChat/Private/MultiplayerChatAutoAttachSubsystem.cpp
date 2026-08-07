@@ -18,12 +18,7 @@ bool UMultiplayerChatAutoAttachSubsystem::ShouldCreateSubsystem(UObject* Outer) 
 		return false;
 	}
 
-	// 클라이언트는 컴포넌트를 별도로 생성하지 않고 서버의 복제를 기다립니다.
-	if (World->GetNetMode() == NM_Client)
-	{
-		return false;
-	}
-
+	// 네트워크 모드는 월드 시작 시점에 최종적으로 검사합니다.
 	return true;
 }
 
@@ -31,7 +26,8 @@ void UMultiplayerChatAutoAttachSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	if (!InWorld.IsGameWorld() || InWorld.GetNetMode() == NM_Client)
+	// 메인 메뉴 같은 독립 실행 월드에는 채팅을 자동 장착하지 않습니다.
+	if (!InWorld.IsGameWorld() || InWorld.GetNetMode() == NM_Standalone)
 	{
 		return;
 	}
@@ -73,36 +69,53 @@ void UMultiplayerChatAutoAttachSubsystem::HandleActorSpawned(AActor* SpawnedActo
 
 void UMultiplayerChatAutoAttachSubsystem::AttachChatComponent(APlayerController* PlayerController)
 {
-	if (PlayerController == nullptr || !PlayerController->HasAuthority())
+	if (PlayerController == nullptr)
 	{
 		return;
 	}
 
-	// 이미 수동 또는 자동으로 장착된 컴포넌트가 있으면 중복 생성하지 않습니다.
-	if (PlayerController->FindComponentByClass<UMultiplayerChatComponent>() != nullptr)
+	UMultiplayerChatComponent* ChatComponent = PlayerController->FindComponentByClass<UMultiplayerChatComponent>();
+
+	// 기존 컴포넌트가 있으면 중복 생성하지 않고 로컬 UI만 복구합니다.
+	if (ChatComponent != nullptr)
+	{
+		if (PlayerController->IsLocalController())
+		{
+			ChatComponent->EnsureLocalChatInitialized();
+		}
+
+		return;
+	}
+
+	// 클라이언트는 컴포넌트를 생성하지 않고 서버의 복제를 기다립니다.
+	if (!PlayerController->HasAuthority())
 	{
 		return;
 	}
 
-	// 서버가 PlayerController를 Outer로 사용해 복제 가능한 컴포넌트를 생성합니다.
-	UMultiplayerChatComponent* ChatComponent =
-		NewObject<UMultiplayerChatComponent>(
-			PlayerController,
-			UMultiplayerChatComponent::StaticClass(),
-			TEXT("MultiplayerChatComponent")
-		);
+	// 서버가 PlayerController에 복제 가능한 채팅 컴포넌트를 생성합니다.
+	ChatComponent = NewObject<UMultiplayerChatComponent>(
+		PlayerController,
+		UMultiplayerChatComponent::StaticClass(),
+		TEXT("MultiplayerChatComponent")
+	);
 
 	if (ChatComponent == nullptr)
 	{
 		return;
 	}
 
-	// 동적 컴포넌트를 PlayerController의 인스턴스 컴포넌트로 등록합니다.
 	PlayerController->AddInstanceComponent(ChatComponent);
 	ChatComponent->SetIsReplicated(true);
 	ChatComponent->RegisterComponent();
 
-	// 새 컴포넌트가 소유 클라이언트에 빠르게 복제되도록 갱신을 요청합니다.
+	// Listen Server의 로컬 플레이어 UI도 즉시 준비합니다.
+	if (PlayerController->IsLocalController())
+	{
+		ChatComponent->EnsureLocalChatInitialized();
+	}
+
+	// 새 컴포넌트가 소유 클라이언트에 빠르게 복제되도록 갱신합니다.
 	PlayerController->ForceNetUpdate();
 }
 

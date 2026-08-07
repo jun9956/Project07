@@ -14,9 +14,7 @@ public class Project7 : ModuleRules
 			"CoreUObject", 
 			"Engine", 
 			"InputCore", 
-			"EnhancedInput",
-			"MultiplayerChat"
-			
+			"EnhancedInput"
 		});
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{

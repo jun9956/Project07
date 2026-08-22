@@ -1,0 +1,19 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1.0",
+    "FriendlyName": "Temporary",
+    "Description": "Reusable temporary runtime plugin.",
+    "Category": "Other",
+    "CreatedBy": "Project7",
+    "CanContainContent": true,
+    "IsBetaVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "Temporary",
+            "Type": "Runtime",
+            "LoadingPhase": "Default"
+        }
+    ]
+}

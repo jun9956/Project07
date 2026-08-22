@@ -11,5 +11,6 @@ public class Project7Target : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V5;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_5;
 		ExtraModuleNames.Add("Project7");
+		ExtraModuleNames.Add("Test");
 	}
 }

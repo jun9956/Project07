@@ -1,6 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "Project7Character.h"
+
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -10,6 +10,9 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+
+#include "TestActor.h"
+#include "Engine/World.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -53,6 +56,34 @@ AProject7Character::AProject7Character()
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
 }
+
+// 스폰
+void AProject7Character::BeginPlay()
+{
+	// 1. 부모 캐릭터의 BeginPlay()를 먼저 실행한다.
+	Super::BeginPlay();
+
+	// 2. 현재 캐릭터가 속한 월드가 유효한지 확인한다.
+	if (UWorld* World = GetWorld())
+	{
+		// 3. 캐릭터 앞쪽 200cm 위치를 스폰 위치로 계산한다.
+		const FVector SpawnLocation =
+			GetActorLocation() + GetActorForwardVector() * 200.0f;
+
+		// 캐릭터와 같은 방향으로 생성되도록 회전값을 가져온다.
+		const FRotator SpawnRotation = GetActorRotation();
+
+		// 4. Test 모듈의 ATestActor를 월드에 생성한다.
+		// 생성 직후 ATestActor::BeginPlay()가 실행되어
+		// 로그와 화면 메시지가 출력된다.
+		World->SpawnActor<ATestActor>(
+			ATestActor::StaticClass(),
+			SpawnLocation,
+			SpawnRotation
+		);
+	}
+}
+
 
 //////////////////////////////////////////////////////////////////////////
 // Input

@@ -127,6 +127,9 @@ private:
 	// 슬래시 명령어를 분석하고 처리
 	// 입력을 명령어로 소비했다면 true를 반환
 	bool TryHandleChatCommand(const FString& InputText);
+	
+	// 로컬 플레이어의 채팅창에 시스템 메시지를 표시
+	void DisplayLocalSystemMessage(const FString& MessageText);
 
 	// 로컬 플레이어의 기본 발신 채널을 변경
 	void SetActiveChatChannel(EMultiplayerChatChannel NewChannel);

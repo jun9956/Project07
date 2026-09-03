@@ -169,6 +169,25 @@ bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
 	CommandName.TrimStartAndEndInline();
 	Arguments.TrimStartAndEndInline();
 
+	if (CommandName.Equals(TEXT("help"), ESearchCase::IgnoreCase))
+	{
+		DisplayLocalSystemMessage(
+			TEXT(
+				"Chat commands:\n"
+				"/g [message] - Switch to global chat or send a global message.\n"
+				"/p [message] - Switch to party chat or send a party message.\n"
+				"/w <nickname> <message> - Send a whisper.\n"
+				"/party create - Create a party.\n"
+				"/party join <nickname> - Join a player's party.\n"
+				"/party leave - Leave the current party.\n"
+				"/nick <nickname> - Change your nickname.\n"
+				"/help - Show this help."
+			)
+		);
+
+		return true;
+	}
+
 	if (CommandName.Equals(TEXT("nick"), ESearchCase::IgnoreCase))
 	{
 		RequestNicknameChange(Arguments);
@@ -267,6 +286,36 @@ bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
 	);
 
 	return true;
+}
+
+void UMultiplayerChatComponent::DisplayLocalSystemMessage(const FString& MessageText)
+{
+	APlayerController* OwningPlayerController = Cast<APlayerController>(GetOwner());
+
+	if (OwningPlayerController == nullptr || !OwningPlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	FString SanitizedMessage = MessageText;
+	SanitizedMessage.TrimStartAndEndInline();
+
+	if (SanitizedMessage.IsEmpty())
+	{
+		return;
+	}
+
+	FMultiplayerChatMessage SystemMessage;
+	SystemMessage.MessageId = FGuid::NewGuid();
+	SystemMessage.SenderId = TEXT("");
+	SystemMessage.SenderName = TEXT("System");
+	SystemMessage.Channel = EMultiplayerChatChannel::System;
+	SystemMessage.ChannelId = TEXT("");
+	SystemMessage.ChannelDisplayName = TEXT("System");
+	SystemMessage.MessageText = SanitizedMessage;
+	SystemMessage.ServerTimestamp = FDateTime::UtcNow();
+
+	OnMessageReceived.Broadcast(SystemMessage);
 }
 
 void UMultiplayerChatComponent::SendGlobalMessage(const FString& MessageText)
@@ -581,19 +630,21 @@ void UMultiplayerChatComponent::ServerSendWhisperMessage_Implementation(
 
 	if (SanitizedTargetNickname.IsEmpty() || SanitizedMessage.IsEmpty())
 	{
-		SendSystemMessageToOwner(TEXT("사용법: /w 닉네임 메시지"));
+
+		SendSystemMessageToOwner(TEXT("Usage: /w <nickname> <message>"));
 		return;
 	}
 
 	if (SanitizedMessage.Len() > MaximumMessageLength)
 	{
-		SendSystemMessageToOwner(TEXT("귓속말은 256자 이하로 입력해주세요."));
+
+		SendSystemMessageToOwner(TEXT("Whisper messages must be 256 characters or fewer."));
 		return;
 	}
 
 	if (SanitizedTargetNickname.Len() > MaximumNicknameLength)
 	{
-		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("Target player not found."));
 		return;
 	}
 
@@ -634,7 +685,7 @@ void UMultiplayerChatComponent::ServerSendWhisperMessage_Implementation(
 
 	if (MatchingPlayerCount == 0)
 	{
-		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("Target player not found."));
 		return;
 	}
 
@@ -642,14 +693,14 @@ void UMultiplayerChatComponent::ServerSendWhisperMessage_Implementation(
 	if (MatchingPlayerCount > 1)
 	{
 		SendSystemMessageToOwner(
-			TEXT("같은 닉네임의 플레이어가 여러 명 있어 귓속말을 보낼 수 없습니다.")
+			TEXT("Multiple players have that nickname. Unable to send the whisper.")
 		);
 		return;
 	}
 
 	if (RecipientController == SenderController)
 	{
-		SendSystemMessageToOwner(TEXT("자기 자신에게는 귓속말을 보낼 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("You cannot whisper to yourself."));
 		return;
 	}
 
@@ -657,7 +708,7 @@ void UMultiplayerChatComponent::ServerSendWhisperMessage_Implementation(
 
 	if (RecipientChatComponent == nullptr || RecipientPlayerState == nullptr)
 	{
-		SendSystemMessageToOwner(TEXT("대상 플레이어가 채팅을 사용할 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("The target player cannot use chat."));
 		return;
 	}
 
@@ -711,20 +762,20 @@ void UMultiplayerChatComponent::ServerSendPartyMessage_Implementation(const FStr
 
 	if (SanitizedMessage.IsEmpty())
 	{
-		SendSystemMessageToOwner(TEXT("사용법: /p 메시지"));
+		SendSystemMessageToOwner(TEXT("Usage: /p <message>"));
 		return;
 	}
 
 	if (SanitizedMessage.Len() > MaximumMessageLength)
 	{
-		SendSystemMessageToOwner(TEXT("파티 메시지는 256자 이하로 입력해주세요."));
+		SendSystemMessageToOwner(TEXT("Party messages must be 256 characters or fewer."));
 		return;
 	}
 
 	if (CurrentPartyId.IsEmpty())
 	{
 		SendSystemMessageToOwner(
-			TEXT("파티 채팅을 사용하려면 먼저 파티에 참가해야 합니다.")
+			TEXT("You must join a party before using party chat.")
 		);
 		return;
 	}
@@ -790,7 +841,7 @@ void UMultiplayerChatComponent::ServerCreateParty_Implementation()
 		CurrentTime - LastPartyCommandTime < MinimumPartyCommandInterval
 	)
 	{
-		SendSystemMessageToOwner(TEXT("파티 명령은 잠시 후 다시 시도해주세요."));
+		SendSystemMessageToOwner(TEXT("Please try the party command again shortly."));
 		return;
 	}
 
@@ -799,14 +850,14 @@ void UMultiplayerChatComponent::ServerCreateParty_Implementation()
 	// 이미 파티에 속한 플레이어는 새 파티를 생성할 수 없습니다.
 	if (!CurrentPartyId.IsEmpty())
 	{
-		SendSystemMessageToOwner(TEXT("이미 파티에 참가하고 있습니다."));
+		SendSystemMessageToOwner(TEXT("You are already in a party."));
 		return;
 	}
 
 	// 서버가 예측하기 어려운 고유 파티 식별자를 생성
 	CurrentPartyId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
 
-	SendSystemMessageToOwner(TEXT("파티를 생성했습니다."));
+	SendSystemMessageToOwner(TEXT("Party created."));
 }
 
 void UMultiplayerChatComponent::ServerJoinParty_Implementation(const FString& TargetNickname)
@@ -834,7 +885,7 @@ void UMultiplayerChatComponent::ServerJoinParty_Implementation(const FString& Ta
 	if (
 		LastPartyCommandTime >= 0.0 && CurrentTime - LastPartyCommandTime < MinimumPartyCommandInterval)
 	{
-		SendSystemMessageToOwner(TEXT("파티 명령은 잠시 후 다시 시도해주세요."));
+		SendSystemMessageToOwner(TEXT("Please try the party command again shortly."));
 		return;
 	}
 
@@ -843,21 +894,21 @@ void UMultiplayerChatComponent::ServerJoinParty_Implementation(const FString& Ta
 	if (SanitizedTargetNickname.IsEmpty())
 	{
 		SendSystemMessageToOwner(
-			TEXT("사용법: /party create | /party join 닉네임 | /party leave")
+			TEXT("Usage: /party create | /party join <nickname> | /party leave")
 		);
 		return;
 	}
 
 	if (SanitizedTargetNickname.Len() > MaximumNicknameLength)
 	{
-		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("Target player not found."));
 		return;
 	}
 
 	// 이미 파티에 속한 플레이어는 다른 파티에 참가할 수 없습니다.
 	if (!CurrentPartyId.IsEmpty())
 	{
-		SendSystemMessageToOwner(TEXT("이미 파티에 참가하고 있습니다."));
+		SendSystemMessageToOwner(TEXT("You are already in a party."));
 		return;
 	}
 
@@ -895,21 +946,21 @@ void UMultiplayerChatComponent::ServerJoinParty_Implementation(const FString& Ta
 
 	if (MatchingPlayerCount == 0)
 	{
-		SendSystemMessageToOwner(TEXT("대상 플레이어를 찾을 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("Target player not found."));
 		return;
 	}
 
 	if (MatchingPlayerCount > 1)
 	{
 		SendSystemMessageToOwner(
-			TEXT("같은 닉네임의 플레이어가 여러 명 있어 파티에 참가할 수 없습니다.")
+			TEXT("Multiple players have that nickname. Unable to join the party.")
 		);
 		return;
 	}
 
 	if (TargetController == RequestingController)
 	{
-		SendSystemMessageToOwner(TEXT("자기 자신을 대상으로 파티에 참가할 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("You cannot target yourself when joining a party."));
 		return;
 	}
 
@@ -917,13 +968,13 @@ void UMultiplayerChatComponent::ServerJoinParty_Implementation(const FString& Ta
 
 	if (TargetChatComponent == nullptr)
 	{
-		SendSystemMessageToOwner(TEXT("대상 플레이어가 파티 기능을 사용할 수 없습니다."));
+		SendSystemMessageToOwner(TEXT("The target player cannot use party features."));
 		return;
 	}
 
 	if (TargetChatComponent->CurrentPartyId.IsEmpty())
 	{
-		SendSystemMessageToOwner(TEXT("대상 플레이어가 파티에 참가하고 있지 않습니다."));
+		SendSystemMessageToOwner(TEXT("The target player is not in a party."));
 		return;
 	}
 
@@ -932,7 +983,7 @@ void UMultiplayerChatComponent::ServerJoinParty_Implementation(const FString& Ta
 
 	SendSystemMessageToOwner(
 		FString::Printf(
-			TEXT("%s님의 파티에 참가했습니다."),
+			TEXT("You joined %s's party."),
 			*TargetDisplayName
 		)
 	);
@@ -959,7 +1010,7 @@ void UMultiplayerChatComponent::ServerLeaveParty_Implementation()
 	// 파티 명령을 지나치게 빠르게 반복할 수 없도록 제한합니다.
 	if (LastPartyCommandTime >= 0.0 && CurrentTime - LastPartyCommandTime < MinimumPartyCommandInterval)
 	{
-		SendSystemMessageToOwner(TEXT("파티 명령은 잠시 후 다시 시도해주세요."));
+		SendSystemMessageToOwner(TEXT("Please try the party command again shortly."));
 		return;
 	}
 
@@ -968,14 +1019,14 @@ void UMultiplayerChatComponent::ServerLeaveParty_Implementation()
 	// 파티에 참가하지 않은 플레이어는 탈퇴할 수 없습니다.
 	if (CurrentPartyId.IsEmpty())
 	{
-		SendSystemMessageToOwner(TEXT("현재 참가하고 있는 파티가 없습니다."));
+		SendSystemMessageToOwner(TEXT("You are not currently in a party."));
 		return;
 	}
 
 	// 서버가 관리하는 파티 소속 정보를 제거합니다.
 	CurrentPartyId.Empty();
 
-	SendSystemMessageToOwner(TEXT("파티에서 탈퇴했습니다."));
+	SendSystemMessageToOwner(TEXT("You left the party."));
 }
 
 void UMultiplayerChatComponent::ClientReceiveMessage_Implementation(const FMultiplayerChatMessage& Message)

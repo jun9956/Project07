@@ -285,6 +285,7 @@ bool UMultiplayerChatComponent::TryHandleChatCommand(const FString& InputText)
 		*CommandName
 	);
 
+	DisplayLocalSystemMessage(TEXT("Unknown command. Type /help to see available commands."));
 	return true;
 }
 
